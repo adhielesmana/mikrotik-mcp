@@ -1,0 +1,8 @@
+{
+  "default": "core",
+  "routers": [
+    { "name": "core",   "host": "10.0.0.1",           "username": "mcp", "password": "change-me", "tls": true, "insecure": true },
+    { "name": "branch", "host": "branch.example.net", "port": 8443, "username": "mcp", "password": "change-me", "tls": true },
+    { "name": "bras-v6", "host": "10.0.0.2", "protocol": "api", "username": "mcp", "password": "change-me", "tls": false }
+  ]
+}

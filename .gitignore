@@ -1,0 +1,6 @@
+node_modules
+dist
+routers.json
+.env
+# MikroTik documentation is copyrighted: build it locally with `npm run scrape`, do not publish it
+docs/
