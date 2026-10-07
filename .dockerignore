@@ -1,0 +1,9 @@
+.git
+.github
+node_modules
+dist
+docs
+routers.json
+.env
+*.md
+!README.md

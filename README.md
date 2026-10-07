@@ -15,14 +15,23 @@ No tool returns model-written knowledge. Every change is previewed and needs you
 
 ## Quick start
 
+Works on any Linux (or macOS/Windows) machine with Docker, amd64 or arm64. Building the image downloads MikroTik's official documentation into your own copy (~3 min the first time):
+
 ```bash
 git clone https://github.com/adhielesmana/mikrotik-mcp.git
 cd mikrotik-mcp
-npm install
-npm run scrape   # download the official docs into ./docs (~2 min)
-npm run build
-claude mcp add mikrotik -e MIKROTIK_HOST=192.168.88.1 -e MIKROTIK_USER=mcp -e MIKROTIK_PASSWORD=secret -e MIKROTIK_INSECURE=true -- node "$PWD/dist/index.js"
+docker build -t mikrotik-mcp .
 ```
+
+Register it in your MCP client as a stdio server. `-i` is required; don't add `-t`:
+
+```bash
+claude mcp add mikrotik -- docker run -i --rm \
+  -e MIKROTIK_HOST=192.168.88.1 -e MIKROTIK_USER=mcp -e MIKROTIK_PASSWORD=secret -e MIKROTIK_INSECURE=true \
+  mikrotik-mcp
+```
+
+No Docker? See [Install on Linux without Docker](#install-on-linux-without-docker).
 
 Then ask, for example:
 - *"Run a health check on my router"*: read-only, with each finding cited to the manual
@@ -95,12 +104,40 @@ Prompts: `mikrotik_health_check` (read-only, cited) and `mikrotik_safe_change` (
 
 These safeguards make answers *checkable*, but they can't make a model infallible. Use the citations to verify anything important.
 
-## Setup
+## Install
+
+### Docker (recommended)
 
 ```bash
-npm install
-npm run scrape   # builds docs/ from manual.mikrotik.com + help.mikrotik.com (~2 min, ~16 MB)
+git clone https://github.com/adhielesmana/mikrotik-mcp.git
+cd mikrotik-mcp
+docker build -t mikrotik-mcp .
+```
+Refresh the docs later (re-downloads only the docs layer):
+```bash
+docker build --build-arg DOCS_VERSION=$(date +%F) -t mikrotik-mcp .
+```
+No prebuilt image is published, because it would redistribute MikroTik's documentation. CI only verifies that the image builds and answers over stdio.
+
+The Dockerfile is cache-friendly: package manifests are copied first, npm uses a BuildKit cache mount, and the docs download sits in its own layer. A source-only change rebuilds in seconds without re-installing packages or re-downloading docs.
+
+Several routers: mount a config file.
+```bash
+docker run -i --rm -v /etc/mikrotik-mcp/routers.json:/config/routers.json:ro \
+  -e MIKROTIK_CONFIG=/config/routers.json mikrotik-mcp
+```
+
+### Install on Linux without Docker
+
+Requirements: **Node.js 18+** (20 or 22 recommended), `git`, and outbound HTTPS to fetch the docs. If your distribution's Node.js is older than 18, use the official binaries from [nodejs.org](https://nodejs.org/en/download). No other system packages are needed; all dependencies are pure JavaScript.
+
+```bash
+git clone https://github.com/adhielesmana/mikrotik-mcp.git
+cd mikrotik-mcp
+npm ci
+npm run scrape   # downloads manual.mikrotik.com + help.mikrotik.com into ./docs (~2 min, ~17 MB)
 npm run build
+node dist/index.js   # the MCP client starts this for you; see "Client configuration"
 ```
 
 `docs/VERSION.json` records the scrape date, each site's page count and last-modified date, and `routerosStableAtScrape`, the latest stable RouterOS reported by `upgrade.mikrotik.com` (7.24.5 at the last scrape). Neither site tags its content with a single RouterOS version; both track current v7. Re-run `npm run scrape` to refresh.
@@ -145,26 +182,43 @@ Check every command above against the manual: [User](https://manual.mikrotik.com
 | `MIKROTIK_MENU_CHECK` | `true` | Refuse menu paths not documented in the manual |
 | `MIKROTIK_DOCS_DIR` | `./docs` | Corpus location |
 
-### Claude Desktop (`claude_desktop_config.json`)
+### Client configuration
+
+#### Claude Desktop (`claude_desktop_config.json`), Docker
 ```json
 {
   "mcpServers": {
     "mikrotik": {
-      "command": "node",
-      "args": ["/Users/you/MikroTikMCP/dist/index.js"],
+      "command": "docker",
+      "args": ["run", "-i", "--rm",
+               "-e", "MIKROTIK_HOST", "-e", "MIKROTIK_USER", "-e", "MIKROTIK_PASSWORD", "-e", "MIKROTIK_INSECURE",
+               "mikrotik-mcp"],
       "env": { "MIKROTIK_HOST": "192.168.88.1", "MIKROTIK_USER": "mcp", "MIKROTIK_PASSWORD": "…", "MIKROTIK_INSECURE": "true" }
     }
   }
 }
 ```
 
-### Claude Code
-```bash
-claude mcp add mikrotik -e MIKROTIK_HOST=192.168.88.1 -e MIKROTIK_USER=mcp -e MIKROTIK_PASSWORD=… -e MIKROTIK_INSECURE=true -- node /Users/you/MikroTikMCP/dist/index.js
+#### Claude Desktop, from source
+```json
+{
+  "mcpServers": {
+    "mikrotik": {
+      "command": "node",
+      "args": ["/opt/mikrotik-mcp/dist/index.js"],
+      "env": { "MIKROTIK_HOST": "192.168.88.1", "MIKROTIK_USER": "mcp", "MIKROTIK_PASSWORD": "…", "MIKROTIK_INSECURE": "true" }
+    }
+  }
+}
 ```
 
-### Kimi Work / other MCP clients
-Any client that supports **stdio** MCP servers can use the same three values: command `node`, args `["/path/to/MikroTikMCP/dist/index.js"]`, and the `MIKROTIK_*` environment variables above. Enter them wherever your client registers local MCP servers.
+#### Claude Code, from source
+```bash
+claude mcp add mikrotik -e MIKROTIK_HOST=192.168.88.1 -e MIKROTIK_USER=mcp -e MIKROTIK_PASSWORD=… -e MIKROTIK_INSECURE=true -- node /opt/mikrotik-mcp/dist/index.js
+```
+
+#### Kimi Work / other MCP clients
+Any client that supports **stdio** MCP servers works. Use either command `docker` with args `["run","-i","--rm","-e","MIKROTIK_HOST",…,"mikrotik-mcp"]`, or command `node` with args `["/path/to/mikrotik-mcp/dist/index.js"]`, plus the `MIKROTIK_*` environment variables above.
 
 ## Project layout
 
@@ -180,7 +234,9 @@ src/
   util.ts      shared helpers
 scripts/
   scrape-docs.mjs  builds docs/ from manual.mikrotik.com (official .md copies) and help.mikrotik.com (Confluence API)
-docs/          generated by `npm run scrape` (not committed)
+docs/          generated by `npm run scrape` (not committed; downloaded into your locally built image)
+Dockerfile     multi-stage, cache-friendly build (amd64 + arm64)
+.github/workflows/docker.yml  CI: builds amd64 + arm64 and smoke-tests MCP over stdio (publishes nothing)
 ```
 
 ## Disclaimer

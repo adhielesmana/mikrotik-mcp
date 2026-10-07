@@ -1,0 +1,45 @@
+name: docker
+
+# Verifies the image builds on linux/amd64 + linux/arm64 and answers MCP over stdio.
+# Nothing is published: the image contains MikroTik's documentation, which users
+# download themselves by building the image locally.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Build linux/amd64 + linux/arm64
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Load linux/amd64 image for testing
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: mikrotik-mcp:ci
+          cache-from: type=gha
+      - name: Smoke test (MCP initialize + search_manual over stdio)
+        run: |
+          printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' \
+            '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"mikrotik_search_manual","arguments":{"query":"bridge vlan filtering","limit":1}}}' \
+            | timeout 60 docker run -i --rm mikrotik-mcp:ci > out.txt
+          head -c 1500 out.txt; echo
+          grep -q '"id":2' out.txt && grep -q 'manual.mikrotik.com' out.txt
